@@ -39,7 +39,9 @@ button{font:inherit;font-size:12.5px;padding:5px 10px;border:1px solid #d5dcd9;b
 .meas{position:absolute;z-index:1000;right:10px;top:160px;width:250px;max-height:45%;overflow:auto;background:rgba(255,255,255,.96);border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.3);padding:10px 12px;font-size:13px;line-height:1.5}
 .meas .tot{font-size:18px;font-weight:700;font-family:Consolas,monospace}.meas .k{color:#5d6b66;font-size:12px}
 .meas .seg{display:flex;justify-content:space-between;gap:8px;font-family:Consolas,monospace;font-size:12px;border-bottom:1px dashed #e1e6e4}
-.meas .b{display:flex;gap:6px;margin-top:8px}.meas .b button{padding:4px 8px}
+.meas .b{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.meas .sum{background:#f3f0ff;border-radius:8px;padding:8px 10px;margin:6px 0;color:#5f3dc4;font-weight:600}.meas .sum span{font-size:24px;font-family:Consolas,monospace}
+.meas button.done{background:#5f3dc4;color:#fff;border-color:#5f3dc4}.meas button.xl{background:#1d6f42;color:#fff;border-color:#1d6f42;font-weight:600}.meas .b button{padding:4px 8px}
 .mlbl{background:#5f3dc4;color:#fff;border:0;box-shadow:none;font:600 11px Consolas,monospace;padding:1px 4px}.mlbl:before{display:none}
 .measuring .leaflet-container,.measuring #map{cursor:crosshair}
 @media (max-width:760px){.meas{left:10px;right:10px;width:auto;top:auto;bottom:22px;max-height:38%}}
@@ -129,7 +131,7 @@ function snap(ll){const z=map.getZoom(),px=map.latLngToContainerPoint(ll);let be
   for(const t of D.tba){if(hidden.has(t.xa))continue;if(!t.b.pad(.05).contains(ll)&&t.b.isValid()&&t.b.getCenter().distanceTo(ll)>3000)continue;
     const cand=t.poles.map(p=>[p[0],p[1],'Cột '+p[2],t]);if(t.tba)cand.push([t.tba[0],t.tba[1],'TBA '+t.name,t]);
     for(const c of cand){const q=map.latLngToContainerPoint([c[0],c[1]]);const d=Math.hypot(q.x-px.x,q.y-px.y);if(d<bd){bd=d;best=c}}}
-  return best?{ll:L.latLng(best[0],best[1]),name:best[2]+' ('+best[3].name+')'}:{ll,name:'Điểm '+ll.lat.toFixed(6)+', '+ll.lng.toFixed(6)}}
+  return best?{ll:L.latLng(best[0],best[1]),name:best[2]+' ('+best[3].name+')',lbl:best[2],tba:best[3].name,xa:best[3].xa}:{ll,name:'Điểm '+ll.lat.toFixed(6)+', '+ll.lng.toFixed(6),lbl:'Điểm tự chọn',tba:'',xa:''}}
 function drawMeas(){mLayer.clearLayers();let tot=0,rows='';
   mpts.forEach((p,i)=>{L.circleMarker(p.ll,{radius:6,color:'#fff',weight:2,fillColor:'#5f3dc4',fillOpacity:1}).addTo(mLayer);
     if(i){const a=mpts[i-1].ll,d=a.distanceTo(p.ll);tot+=d;
@@ -139,8 +141,29 @@ function drawMeas(){mLayer.clearLayers();let tot=0,rows='';
   $('meas').innerHTML=`<div class="k">${mpts.length<2?'Bấm vào cột đầu tiên, rồi cột tiếp theo. Bấm gần cột sẽ tự bắt đúng tâm cột.':'Tổng chiều dài ('+(mpts.length-1)+' khoảng)'}</div>`+
     (mpts.length>=2?`<div class="tot">${tot<1000?tot.toFixed(1)+' m':(tot/1000).toFixed(3)+' km'}</div>`:'')+
     (mpts[0]?`<div class="k">Bắt đầu: ${esc(mpts[0].name)}</div>`:'')+rows+
-    `<div class="b"><button id="mu">Xoá điểm cuối</button><button id="mc">Đo lại</button></div>`;
-  $('mu').onclick=()=>{mpts.pop();drawMeas()};$('mc').onclick=()=>{mpts=[];drawMeas()};}
+    `<div class="b"><button id="mu">Xoá điểm cuối</button><button id="mc">Đo lại</button>${mpts.length>=2?'<button id="mx" class="done">Xong</button>':''}</div>`;
+  $('mu').onclick=()=>{mpts.pop();drawMeas()};$('mc').onclick=()=>{mpts=[];drawMeas()};if($('mx'))$('mx').onclick=finishMeas;}
+function measRows(){let cum=0;return mpts.slice(1).map((p,i)=>{const a=mpts[i],d=a.ll.distanceTo(p.ll);cum+=d;return {i:i+1,a,b:p,d,cum}})}
+function finishMeas(){measOn=false;$('mea').classList.remove('on');$('mea').textContent='Đo khoảng cách';document.body.classList.remove('measuring');
+  const R=measRows(),tot=R.length?R[R.length-1].cum:0;
+  $('meas').innerHTML=`<div class="k">Kết quả đo · ${R.length} khoảng · ${mpts.length} điểm</div>
+   <div class="k">Từ <b>${esc(mpts[0].name)}</b><br>đến <b>${esc(mpts[mpts.length-1].name)}</b></div>
+   <div class="sum">Tổng chiều dài<br><span>${tot.toFixed(1)} m</span>${tot>=1000?'<small> ('+(tot/1000).toFixed(3)+' km)</small>':''}</div>`+
+   R.map(r=>`<div class="seg"><span>${esc(r.a.lbl)} → ${esc(r.b.lbl)}</span><b>${r.d.toFixed(1)} m</b></div>`).join('')+
+   `<div class="b"><button id="mxl" class="xl">Xuất Excel</button><button id="mnew">Đo mới</button><button id="mclose">Đóng</button></div><div class="k" id="mxm"></div>`;
+  $('mxl').onclick=exportXlsx;$('mnew').onclick=()=>{$('mea').click()};$('mclose').onclick=()=>{mpts=[];mLayer.clearLayers();$('meas').hidden=true};}
+function loadXLSX(){return window.XLSX?Promise.resolve():new Promise((ok,no)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';s.onload=ok;s.onerror=no;document.head.appendChild(s)})}
+function exportXlsx(){$('mxm').textContent='Đang tạo file…';
+  loadXLSX().then(()=>{const R=measRows(),tot=R.length?R[R.length-1].cum:0;
+    const rows=[['KẾT QUẢ ĐO KHOẢNG CÁCH'],['Ngày đo',new Date().toLocaleString('vi-VN')],['Tổng chiều dài (m)',+tot.toFixed(1)],[],
+      ['STT','Từ','TBA (từ)','Xã (từ)','Đến','TBA (đến)','Xã (đến)','Chiều dài (m)','Luỹ kế (m)','Vĩ độ từ','Kinh độ từ','Vĩ độ đến','Kinh độ đến']];
+    R.forEach(r=>rows.push([r.i,r.a.lbl,r.a.tba,r.a.xa,r.b.lbl,r.b.tba,r.b.xa,+r.d.toFixed(1),+r.cum.toFixed(1),+r.a.ll.lat.toFixed(7),+r.a.ll.lng.toFixed(7),+r.b.ll.lat.toFixed(7),+r.b.ll.lng.toFixed(7)]));
+    rows.push(['','','','','','','Tổng cộng',+tot.toFixed(1)]);
+    const ws=XLSX.utils.aoa_to_sheet(rows);ws['!cols']=[6,16,16,14,16,16,14,13,12,12,12,12,12].map(w=>({wch:w}));
+    const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Do khoang cach');
+    const d=new Date(),p=n=>String(n).padStart(2,'0');
+    XLSX.writeFile(wb,`Do khoang cach ${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}h${p(d.getMinutes())}.xlsx`);
+    $('mxm').textContent='Đã tạo file Excel, xem trong mục Tải xuống.'}).catch(()=>{$('mxm').textContent='Không tải được thư viện Excel, hãy kiểm tra internet.'})}
 $('mea').onclick=()=>{measOn=!measOn;$('mea').classList.toggle('on',measOn);$('mea').textContent=measOn?'Tắt đo':'Đo khoảng cách';
   document.body.classList.toggle('measuring',measOn);$('meas').hidden=!measOn;map.closePopup();
   if(measOn){mpts=[];drawMeas();if(map.getZoom()<16)map.setZoom(17)}else{mpts=[];mLayer.clearLayers()}};
