@@ -35,6 +35,14 @@ button{font:inherit;font-size:12.5px;padding:5px 10px;border:1px solid #d5dcd9;b
 .locbtn{position:absolute;z-index:1000;right:10px;top:64px;background:#0b6e63;color:#fff;border:0;border-radius:8px;padding:9px 12px;font-weight:600;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,.3)}
 .locbtn.on{background:#d9480f}
 .tog{display:none}
+.meabtn{top:112px;background:#5f3dc4}.meabtn.on{background:#d9480f}
+.meas{position:absolute;z-index:1000;right:10px;top:160px;width:250px;max-height:45%;overflow:auto;background:rgba(255,255,255,.96);border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.3);padding:10px 12px;font-size:13px;line-height:1.5}
+.meas .tot{font-size:18px;font-weight:700;font-family:Consolas,monospace}.meas .k{color:#5d6b66;font-size:12px}
+.meas .seg{display:flex;justify-content:space-between;gap:8px;font-family:Consolas,monospace;font-size:12px;border-bottom:1px dashed #e1e6e4}
+.meas .b{display:flex;gap:6px;margin-top:8px}.meas .b button{padding:4px 8px}
+.mlbl{background:#5f3dc4;color:#fff;border:0;box-shadow:none;font:600 11px Consolas,monospace;padding:1px 4px}.mlbl:before{display:none}
+.measuring .leaflet-container,.measuring #map{cursor:crosshair}
+@media (max-width:760px){.meas{left:10px;right:10px;width:auto;top:auto;bottom:22px;max-height:38%}}
 @media (max-width:760px){.app{grid-template-columns:1fr;grid-template-rows:1fr auto}.mapbox{grid-row:1}
  aside{grid-row:2;border-right:0;border-top:1px solid #d5dcd9;max-height:40vh}aside.min>*:not(.head){display:none}
  .head{display:flex;justify-content:space-between;align-items:center}.tog{display:inline-block}}
@@ -60,6 +68,8 @@ button{font:inherit;font-size:12.5px;padding:5px 10px;border:1px solid #d5dcd9;b
 </aside>
 <div class="mapbox"><div id="map"></div>
 <button class="locbtn" id="loc">Định vị cột</button>
+<button class="locbtn meabtn" id="mea">Đo khoảng cách</button>
+<div class="meas" id="meas" hidden></div>
 <div class="gps" id="gps" hidden></div></div>
 </div>
 <script>
@@ -113,11 +123,35 @@ function refresh(){
   tbaMk.forEach(m=>{showL?m.openTooltip():m.closeTooltip()});
 }
 map.on('moveend',refresh);
+// ĐO KHOẢNG CÁCH: bấm lần lượt vào các cột (tự bắt vào cột gần nhất trong ~25 px), hoặc điểm bất kỳ
+let measOn=false,mpts=[],mLayer=L.layerGroup().addTo(map);
+function snap(ll){const z=map.getZoom(),px=map.latLngToContainerPoint(ll);let best=null,bd=25;
+  for(const t of D.tba){if(hidden.has(t.xa))continue;if(!t.b.pad(.05).contains(ll)&&t.b.isValid()&&t.b.getCenter().distanceTo(ll)>3000)continue;
+    const cand=t.poles.map(p=>[p[0],p[1],'Cột '+p[2],t]);if(t.tba)cand.push([t.tba[0],t.tba[1],'TBA '+t.name,t]);
+    for(const c of cand){const q=map.latLngToContainerPoint([c[0],c[1]]);const d=Math.hypot(q.x-px.x,q.y-px.y);if(d<bd){bd=d;best=c}}}
+  return best?{ll:L.latLng(best[0],best[1]),name:best[2]+' ('+best[3].name+')'}:{ll,name:'Điểm '+ll.lat.toFixed(6)+', '+ll.lng.toFixed(6)}}
+function drawMeas(){mLayer.clearLayers();let tot=0,rows='';
+  mpts.forEach((p,i)=>{L.circleMarker(p.ll,{radius:6,color:'#fff',weight:2,fillColor:'#5f3dc4',fillOpacity:1}).addTo(mLayer);
+    if(i){const a=mpts[i-1].ll,d=a.distanceTo(p.ll);tot+=d;
+      L.polyline([a,p.ll],{color:'#5f3dc4',weight:3,dashArray:'6 4'}).addTo(mLayer)
+       .bindTooltip(d.toFixed(1)+' m',{permanent:true,direction:'center',className:'mlbl'});
+      rows+=`<div class="seg"><span>${esc(mpts[i-1].name.split(' (')[0])} → ${esc(p.name.split(' (')[0])}</span><b>${d.toFixed(1)} m</b></div>`}});
+  $('meas').innerHTML=`<div class="k">${mpts.length<2?'Bấm vào cột đầu tiên, rồi cột tiếp theo. Bấm gần cột sẽ tự bắt đúng tâm cột.':'Tổng chiều dài ('+(mpts.length-1)+' khoảng)'}</div>`+
+    (mpts.length>=2?`<div class="tot">${tot<1000?tot.toFixed(1)+' m':(tot/1000).toFixed(3)+' km'}</div>`:'')+
+    (mpts[0]?`<div class="k">Bắt đầu: ${esc(mpts[0].name)}</div>`:'')+rows+
+    `<div class="b"><button id="mu">Xoá điểm cuối</button><button id="mc">Đo lại</button></div>`;
+  $('mu').onclick=()=>{mpts.pop();drawMeas()};$('mc').onclick=()=>{mpts=[];drawMeas()};}
+$('mea').onclick=()=>{measOn=!measOn;$('mea').classList.toggle('on',measOn);$('mea').textContent=measOn?'Tắt đo':'Đo khoảng cách';
+  document.body.classList.toggle('measuring',measOn);$('meas').hidden=!measOn;map.closePopup();
+  if(measOn){mpts=[];drawMeas();if(map.getZoom()<16)map.setZoom(17)}else{mpts=[];mLayer.clearLayers()}};
+map.on('click',e=>{if(!measOn)return;mpts.push(snap(e.latlng));drawMeas();map.closePopup()});
+map.on('popupopen',()=>{if(measOn)setTimeout(()=>map.closePopup(),0)});
+tbaMk.forEach(m=>m.on('click',e=>{if(!measOn)return;mpts.push(snap(e.latlng));drawMeas()}));
 $('qc').onchange=()=>{if(!curT)return;const norm=s=>String(s).replace(/\s+/g,'').toLowerCase();const v=norm($('qc').value);if(!v)return;
   const p=curT.poles.find(p=>norm(p[2])===v)||curT.poles.find(p=>norm(p[2]).includes(v));
   if(!p){$('qcn').textContent='Không thấy cột "'+$('qc').value+'" trong TBA '+curT.name+'.';return}
   $('qcn').textContent='';if(poleMk)map.removeLayer(poleMk);
-  poleMk=L.circleMarker([p[0],p[1]],{radius:11,color:'#ffd43b',weight:4,fill:false}).addTo(map);
+  poleMk=L.circleMarker([p[0],p[1]],{radius:11,color:'#ffd43b',weight:4,fill:false,interactive:false}).addTo(map);
   poleMk.bindPopup(`<b>Cột ${esc(p[2])}</b><br>TBA ${esc(curT.name)} (${esc(curT.xa)})<br>Mã lộ: ${esc(p[4])}<br>Dây: ${esc(p[3]||'—')}<br><small>${p[0].toFixed(7)}, ${p[1].toFixed(7)}</small><br>`+gmap(p[0],p[1],'Chỉ đường tới cột này'));
   map.setView([p[0],p[1]],18);setTimeout(()=>poleMk.openPopup(),400);
   const a=document.querySelector('aside');if(matchMedia('(max-width:760px)').matches&&!a.classList.contains('min'))$('tog').click();};['lbl','pol','cl'].forEach(id=>$(id).onchange=refresh);
