@@ -42,7 +42,9 @@ button{font:inherit;font-size:12.5px;padding:5px 10px;border:1px solid #d5dcd9;b
 <div class="app">
 <aside>
   <div class="head"><div><h1>Lưới 0.4kV Thanh Sơn</h1><div class="sub" id="sum"></div></div><button class="tog" id="tog">Thu gọn</button></div>
-  <section><h2>Tìm TBA</h2><input type="search" id="q" placeholder="vd: Yên Lương 7" list="tl"><datalist id="tl"></datalist></section>
+  <section><h2>Tìm TBA</h2><input type="search" id="q" placeholder="vd: Yên Lương 7" list="tl"><datalist id="tl"></datalist>
+    <h2 style="margin-top:10px">Tìm cột trong TBA đã chọn</h2><input type="search" id="qc" placeholder="Chọn TBA trước, rồi gõ số cột, vd: 2.15" list="cl2" disabled><datalist id="cl2"></datalist>
+    <p class="note" id="qcn"></p></section>
   <section><h2>Xã / thị trấn</h2><div class="xa" id="xas"></div>
     <div class="btns"><button id="all">Hiện tất cả</button><button id="none">Ẩn tất cả</button><button id="fit">Xem toàn bộ</button></div></section>
   <section><h2>Hiển thị</h2>
@@ -110,7 +112,15 @@ function refresh(){
   const showL=$('lbl').checked&&z>=13;
   tbaMk.forEach(m=>{showL?m.openTooltip():m.closeTooltip()});
 }
-map.on('moveend',refresh);['lbl','pol','cl'].forEach(id=>$(id).onchange=refresh);
+map.on('moveend',refresh);
+$('qc').onchange=()=>{if(!curT)return;const norm=s=>String(s).replace(/\s+/g,'').toLowerCase();const v=norm($('qc').value);if(!v)return;
+  const p=curT.poles.find(p=>norm(p[2])===v)||curT.poles.find(p=>norm(p[2]).includes(v));
+  if(!p){$('qcn').textContent='Không thấy cột "'+$('qc').value+'" trong TBA '+curT.name+'.';return}
+  $('qcn').textContent='';if(poleMk)map.removeLayer(poleMk);
+  poleMk=L.circleMarker([p[0],p[1]],{radius:11,color:'#ffd43b',weight:4,fill:false}).addTo(map);
+  poleMk.bindPopup(`<b>Cột ${esc(p[2])}</b><br>TBA ${esc(curT.name)} (${esc(curT.xa)})<br>Mã lộ: ${esc(p[4])}<br>Dây: ${esc(p[3]||'—')}<br><small>${p[0].toFixed(7)}, ${p[1].toFixed(7)}</small><br>`+gmap(p[0],p[1],'Chỉ đường tới cột này'));
+  map.setView([p[0],p[1]],18);setTimeout(()=>poleMk.openPopup(),400);
+  const a=document.querySelector('aside');if(matchMedia('(max-width:760px)').matches&&!a.classList.contains('min'))$('tog').click();};['lbl','pol','cl'].forEach(id=>$(id).onchange=refresh);
 $('xas').innerHTML=D.xa.map((x,i)=>`<label><input type="checkbox" data-x="${esc(x)}" checked><span class="sw" style="background:${col(i)}"></span><span class="n">${esc(x)}</span></label>`).join('');
 const syncX=()=>$('xas').querySelectorAll('input').forEach(c=>c.checked=!hidden.has(c.dataset.x));
 $('xas').querySelectorAll('input').forEach(c=>c.onchange=()=>{c.checked?hidden.delete(c.dataset.x):hidden.add(c.dataset.x);refresh();buildAdj()});
@@ -131,8 +141,10 @@ function buildAdj(){
 }
 $('dmax').oninput=buildAdj;
 $('tl').innerHTML=D.tba.map(t=>`<option value="${esc(t.name)}">`).join('');
+let curT=null,poleMk=null;
 $('q').onchange=()=>{const v=$('q').value.trim().toLowerCase();const t=D.tba.find(t=>t.name.toLowerCase()===v)||D.tba.find(t=>t.name.toLowerCase().includes(v));
-  if(!t)return;hidden.delete(t.xa);syncX();refresh();map.fitBounds(t.b.pad(.1));if(t.mk)setTimeout(()=>t.mk.openPopup(),400)};
+  if(!t)return;curT=t;$('qc').disabled=false;$('qc').value='';$('qc').placeholder='Số cột của TBA '+t.name+', vd: '+(t.poles[3]||t.poles[0]||['','','1.1'])[2];
+  $('cl2').innerHTML=t.poles.map(p=>`<option value="${esc(p[2])}">`).join('');$('qcn').textContent='';hidden.delete(t.xa);syncX();refresh();map.fitBounds(t.b.pad(.1));if(t.mk)setTimeout(()=>t.mk.openPopup(),400)};
 $('sum').textContent=`${n} xã/TT · ${D.tba.length} TBA · ${D.tba.reduce((s,t)=>s+t.poles.length,0).toLocaleString('vi-VN')} cột`;
 map.fitBounds(all);buildAdj();refresh();
 // thu gọn bảng trên điện thoại
