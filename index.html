@@ -35,6 +35,9 @@ button{font:inherit;font-size:12.5px;padding:5px 10px;border:1px solid #d5dcd9;b
 .locbtn{position:absolute;z-index:1000;right:10px;top:64px;background:#0b6e63;color:#fff;border:0;border-radius:8px;padding:9px 12px;font-weight:600;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,.3)}
 .locbtn.on{background:#d9480f}
 .tog{display:none}
+.me{position:relative;width:44px;height:44px}.me .cone{position:absolute;inset:0;transform-origin:22px 22px;transition:transform .3s}
+.me .dot{position:absolute;left:14px;top:14px;width:16px;height:16px;border-radius:50%;background:#1c7ed6;border:3px solid #fff;box-shadow:0 0 0 2px rgba(28,126,214,.35),0 1px 4px rgba(0,0,0,.4);box-sizing:border-box}
+.folbtn{position:absolute;z-index:1000;left:50%;transform:translateX(-50%);top:12px;background:#fff;color:#1c7ed6;border:0;border-radius:20px;padding:8px 14px;font-weight:600;font-size:14px;box-shadow:0 2px 10px rgba(0,0,0,.35)}
 .meabtn{top:112px;background:#5f3dc4}.meabtn.on{background:#d9480f}
 .meas{position:absolute;z-index:1000;right:10px;top:160px;width:250px;max-height:45%;overflow:auto;background:rgba(255,255,255,.96);border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.3);padding:10px 12px;font-size:13px;line-height:1.5}
 .meas .tot{font-size:18px;font-weight:700;font-family:Consolas,monospace}.meas .k{color:#5d6b66;font-size:12px}
@@ -70,6 +73,7 @@ button{font:inherit;font-size:12.5px;padding:5px 10px;border:1px solid #d5dcd9;b
 </aside>
 <div class="mapbox"><div id="map"></div>
 <button class="locbtn" id="loc">Định vị cột</button>
+<button class="folbtn" id="fol" hidden>◎ Bám theo vị trí</button>
 <button class="locbtn meabtn" id="mea">Đo khoảng cách</button>
 <div class="meas" id="meas" hidden></div>
 <div class="gps" id="gps" hidden></div></div>
@@ -213,7 +217,7 @@ D.tba.forEach(t=>{if(t.tba)ALL.push([t.tba[0],t.tba[1],'TBA',t,null])});
 function dist(a,b,c,d){const R=6371000,r=Math.PI/180,x=(d-b)*r*Math.cos((a+c)/2*r),y=(c-a)*r;return Math.hypot(x,y)*R}
 function nearest(la,lo,k){const L_=[];for(const q of ALL){if(hidden.has(q[3].xa))continue;if(Math.abs(q[0]-la)>0.02||Math.abs(q[1]-lo)>0.02)continue;
   L_.push([dist(la,lo,q[0],q[1]),q])}L_.sort((a,b)=>a[0]-b[0]);return L_.slice(0,k)}
-let me=null,acc=null,lnk=null,watch=null,follow=true,pick=null;
+let me=null,acc=null,lnk=null,watch=null,follow=true,pick=null,trail=null,trailPts=[],trailLen=0,last=null,head=null,compass=null,wake=null,spd=null;
 const fmt=m=>m<1000?m.toFixed(0)+' m':(m/1000).toFixed(2)+' km';
 function show(la,lo,accu,src){
   const N=nearest(la,lo,4);
@@ -227,26 +231,53 @@ function show(la,lo,accu,src){
    <div>Cách <b>${fmt(d)}</b> · ${gmap(q[0],q[1],'Chỉ đường')}</div>`;
   if(accu!=null&&N[1]&&N[1][0]-d<accu)h+=`<div class="k" style="color:#d9480f">Hai cột gần nhau hơn sai số GPS, hãy đối chiếu biển số cột.</div>`;
   h+='<div class="alt">'+N.slice(1).map(([d2,q2])=>`${q2[2]==='TBA'?'TBA':'Cột '+esc(q2[2])} – ${esc(q2[3].name)} <span class="k">${fmt(d2)}</span>`).join('<br>')+'</div>';
-  $('gps').innerHTML=h;$('gps').hidden=false;$('gx').onclick=closeG;
+  if(src==='Vị trí của bạn')h+=`<div class="k" style="margin-top:4px">${spd!=null?'Tốc độ '+(spd*3.6).toFixed(0)+' km/h · ':''}Đã đi ${fmt(trailLen)} <a href="#" id="clr">Xoá vết</a></div>`;
+  $('gps').innerHTML=h;$('gps').hidden=false;$('gx').onclick=closeG;if($('clr'))$('clr').onclick=e=>{e.preventDefault();trailPts=last?[last]:[];trailLen=0;if(trail)trail.setLatLngs(trailPts)};
 }
 function closeG(){$('gps').hidden=true;if(lnk)map.removeLayer(lnk);lnk=null;if(pick){map.removeLayer(pick);pick=null}}
-function stop(){if(watch!=null)navigator.geolocation.clearWatch(watch);watch=null;$('loc').classList.remove('on');$('loc').textContent='Định vị cột';
-  [me,acc].forEach(l=>l&&map.removeLayer(l));me=acc=null}
+const meIcon=L.divIcon({className:'',iconSize:[44,44],iconAnchor:[22,22],html:`<div class="me"><svg class="cone" width="44" height="44" viewBox="0 0 44 44"><path d="M22 22 L12 2 A22 22 0 0 1 32 2 Z" fill="#1c7ed6" opacity=".35"/></svg><span class="dot"></span></div>`});
+function setHead(h){head=h;const el=me&&me.getElement();if(!el)return;const c=el.querySelector('.cone');if(h==null||isNaN(h)){c.style.display='none'}else{c.style.display='';c.style.transform=`rotate(${h}deg)`}}
+function bearing(a,b){const r=Math.PI/180,y=Math.sin((b[1]-a[1])*r)*Math.cos(b[0]*r),x=Math.cos(a[0]*r)*Math.sin(b[0]*r)-Math.sin(a[0]*r)*Math.cos(b[0]*r)*Math.cos((b[1]-a[1])*r);return (Math.atan2(y,x)/r+360)%360}
+function onOri(e){let h=null;if(e.webkitCompassHeading!=null)h=e.webkitCompassHeading;else if(e.absolute&&e.alpha!=null)h=(360-e.alpha)%360;
+  if(h!=null){compass=h;if(spd==null||spd<1)setHead(h)}}
+function setFollow(f){follow=f;$('fol').hidden=f||watch==null;if(f&&last)map.setView(last,Math.max(map.getZoom(),18))}
+function stop(){if(watch!=null)navigator.geolocation.clearWatch(watch);watch=null;$('loc').classList.remove('on');$('loc').textContent='Định vị cột';$('fol').hidden=true;
+  [me,acc,trail].forEach(l=>l&&map.removeLayer(l));me=acc=trail=null;trailPts=[];trailLen=0;last=null;spd=null;
+  window.removeEventListener('deviceorientationabsolute',onOri);window.removeEventListener('deviceorientation',onOri);
+  if(wake){wake.release().catch(()=>{});wake=null}}
+async function keepAwake(){try{if('wakeLock' in navigator&&!document.hidden)wake=await navigator.wakeLock.request('screen')}catch(e){}}
+document.addEventListener('visibilitychange',()=>{if(watch!=null&&!document.hidden)keepAwake()});
 $('loc').onclick=()=>{
   if(watch!=null){stop();closeG();return}
   if(!navigator.geolocation){alert('Trình duyệt không hỗ trợ định vị.');return}
+  // la bàn: iPhone cần xin quyền ngay trong lúc bấm nút
+  try{if(typeof DeviceOrientationEvent!=='undefined'&&DeviceOrientationEvent.requestPermission)DeviceOrientationEvent.requestPermission().then(r=>{if(r==='granted')window.addEventListener('deviceorientation',onOri)}).catch(()=>{});
+      else if('ondeviceorientationabsolute' in window)window.addEventListener('deviceorientationabsolute',onOri);else window.addEventListener('deviceorientation',onOri)}catch(e){}
+  keepAwake();
   $('loc').classList.add('on');$('loc').textContent='Đang định vị… (bấm để tắt)';follow=true;
+  trail=L.polyline([],{color:'#4dabf7',weight:4,opacity:.8}).addTo(map);
   watch=navigator.geolocation.watchPosition(p=>{
-    const la=p.coords.latitude,lo=p.coords.longitude,a=p.coords.accuracy;
-    if(!me){me=L.circleMarker([la,lo],{radius:8,color:'#fff',weight:3,fillColor:'#1c7ed6',fillOpacity:1}).addTo(map);acc=L.circle([la,lo],{radius:a,color:'#1c7ed6',weight:1,fillOpacity:.12}).addTo(map)}
-    else{me.setLatLng([la,lo]);acc.setLatLng([la,lo]).setRadius(a)}
+    const c=p.coords,ll=[c.latitude,c.longitude],a=c.accuracy;
+    if(!me){acc=L.circle(ll,{radius:a,color:'#1c7ed6',weight:1,fillOpacity:.12,interactive:false}).addTo(map);me=L.marker(ll,{icon:meIcon,interactive:false,zIndexOffset:1000}).addTo(map);setHead(null)}
+    else{me.setLatLng(ll);acc.setLatLng(ll).setRadius(a)}
+    spd=c.speed!=null&&!isNaN(c.speed)?c.speed:null;
+    // hướng đi: GPS khi đang di chuyển, nếu không có thì tính từ 2 vị trí liên tiếp, đứng yên thì dùng la bàn
+    if(c.heading!=null&&!isNaN(c.heading)&&spd!=null&&spd>0.7)setHead(c.heading);
+    else if(last&&dist(last[0],last[1],ll[0],ll[1])>Math.max(5,a/2))setHead(bearing(last,ll));
+    else if(compass!=null)setHead(compass);
+    // vết di chuyển: chỉ ghi điểm khi sai số nhỏ và đã đi được vài mét
+    const lp=trailPts[trailPts.length-1];
+    if(a<=35&&(!lp||dist(lp[0],lp[1],ll[0],ll[1])>=Math.max(3,a/3))){if(lp)trailLen+=dist(lp[0],lp[1],ll[0],ll[1]);trailPts.push(ll);trail.setLatLngs(trailPts)}
+    const first=!last;last=ll;
     $('loc').textContent='Tắt định vị';
-    if(follow){map.setView([la,lo],Math.max(map.getZoom(),18));follow=false}
-    show(la,lo,a,'Vị trí của bạn');
-  },e=>{stop();$('gps').innerHTML=`<button class="x" id="gx">×</button><b>Không lấy được vị trí.</b><div class="k">${e.code===1?'Bạn chưa cho phép truy cập vị trí, hoặc trang không mở qua https.':'Không có tín hiệu GPS, hãy ra chỗ thoáng và thử lại.'}</div>`;$('gps').hidden=false;$('gx').onclick=closeG},
-  {enableHighAccuracy:true,maximumAge:2000,timeout:20000});
+    if(first)map.setView(ll,Math.max(map.getZoom(),18));else if(follow)map.panTo(ll,{animate:true,duration:.5});
+    $('fol').hidden=follow;
+    show(ll[0],ll[1],a,'Vị trí của bạn');
+  },e=>{if(e.code!==1&&me){$('loc').textContent='Mất tín hiệu GPS, đang chờ…';return}stop();$('gps').innerHTML=`<button class="x" id="gx">×</button><b>Không lấy được vị trí.</b><div class="k">${e.code===1?'Bạn chưa cho phép truy cập vị trí, hoặc trang không mở qua https.':'Không có tín hiệu GPS, hãy ra chỗ thoáng và thử lại.'}</div>`;$('gps').hidden=false;$('gx').onclick=closeG},
+  {enableHighAccuracy:true,maximumAge:1000,timeout:30000});
 };
-map.on('dragstart',()=>{follow=false});
+$('fol').onclick=()=>setFollow(true);
+map.on('dragstart',()=>{if(watch!=null)setFollow(false)});
 // chạm giữ / nhấp chuột phải vào bản đồ: tìm cột gần điểm đó
 map.on('contextmenu',e=>{if(pick)map.removeLayer(pick);pick=L.circleMarker(e.latlng,{radius:6,color:'#fff',weight:2,fillColor:'#ffd43b',fillOpacity:1}).addTo(map);show(e.latlng.lat,e.latlng.lng,null,'Điểm đã chọn trên bản đồ')});
 </script></body></html>
